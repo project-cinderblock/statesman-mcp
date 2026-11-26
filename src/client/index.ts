@@ -31,9 +31,11 @@ export class StatesmanApiError extends Error {
 }
 
 export class StatesmanApiClient {
+  public readonly apiUrl: string;
   private http: AxiosInstance;
 
   constructor(config: ServerConfig) {
+    this.apiUrl = config.apiUrl;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json"
@@ -647,7 +649,11 @@ export class StatesmanApiClient {
   }): Promise<ClusterReport> {
     try {
       const res = await this.http.post<ApiResponse<ClusterReport>>("/cluster_reports", data);
-      return res.data.data;
+      const report = res.data.data;
+      if (res.data.meta && (res.data.meta as Record<string, unknown>).job_id) {
+        report.job_id = (res.data.meta as Record<string, unknown>).job_id as string;
+      }
+      return report;
     } catch (err) {
       return this.handleError(err);
     }
@@ -670,7 +676,11 @@ export class StatesmanApiClient {
         `/cluster_reports/${reportId}/deep_synthesis`,
         data || {}
       );
-      return res.data.data;
+      const report = res.data.data;
+      if (res.data.meta && (res.data.meta as Record<string, unknown>).job_id) {
+        report.job_id = (res.data.meta as Record<string, unknown>).job_id as string;
+      }
+      return report;
     } catch (err) {
       return this.handleError(err);
     }
@@ -737,8 +747,10 @@ export class StatesmanApiClient {
 
   async waitForJob(jobId: string, pollIntervalMs = 2000, timeoutMs = 60000): Promise<JobStatus> {
     const startTime = Date.now();
+    let latestJob: JobStatus | undefined;
     while (Date.now() - startTime < timeoutMs) {
       const job = await this.getJob(jobId);
+      latestJob = job;
       if (job.status === "completed") {
         return job;
       }
@@ -750,9 +762,50 @@ export class StatesmanApiClient {
       }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
+    if (latestJob && (latestJob.status === "running" || latestJob.status === "queued" || (latestJob.status as any) === "pending")) {
+      return {
+        ...latestJob,
+        timed_out: true,
+        is_running: true
+      };
+    }
     throw new StatesmanApiError(
       `Job ${jobId} timed out after ${timeoutMs}ms while waiting for completion`,
       "job_timeout"
+    );
+  }
+
+  async waitForClusterReport(
+    id: number,
+    pollIntervalMs = 3000,
+    timeoutMs = 600000
+  ): Promise<ClusterReport> {
+    const startTime = Date.now();
+    let latestReport: ClusterReport | undefined;
+    while (Date.now() - startTime < timeoutMs) {
+      const report = await this.getClusterReport(id, { include_summaries: false, include_sub_reports: false });
+      latestReport = report;
+      if (report.status === "completed") {
+        return report;
+      }
+      if (report.status === "failed") {
+        throw new StatesmanApiError(
+          report.error_message || `Cluster report ${id} failed to generate`,
+          "report_failed"
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    if (latestReport && (latestReport.status === "running" || latestReport.status === "queued" || latestReport.status === "pending")) {
+      return {
+        ...latestReport,
+        timed_out: true,
+        is_running: true
+      };
+    }
+    throw new StatesmanApiError(
+      `Cluster report ${id} timed out after ${timeoutMs}ms while waiting for completion`,
+      "report_timeout"
     );
   }
 }
