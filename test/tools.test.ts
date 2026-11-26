@@ -74,12 +74,13 @@ describe("MCP Server Tool, Resource, and Prompt Execution", () => {
       "delete_cluster_snapshot",
       "list_cluster_groups",
       "get_cluster_group",
-      // Reports (9)
+      // Reports (10)
       "list_cluster_reports",
       "get_cluster_report",
       "create_cluster_report",
       "delete_cluster_report",
       "generate_deep_synthesis",
+      "wait_for_cluster_report",
       "list_report_summaries",
       "get_report_summary",
       "list_report_sub_reports",
